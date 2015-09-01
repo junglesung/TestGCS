@@ -2,58 +2,31 @@ package main
 
 import (
 	"appengine"
-	// "appengine/datastore"
-	"appengine/file"
-	// "bytes"
-	// "encoding/json"
-	"fmt"
+	_ "fmt"
 	"io/ioutil"
-	"log"
-	"math/rand"
+	_ "log"
 	"net/http"
-	// "strings"
-	"time"
 
 	"github.com/pborman/uuid"
-	// "golang.org/x/net/context"
+	gcscontext   "golang.org/x/net/context"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
-	newappengine "google.golang.org/appengine"
-	// "google.golang.org/appengine/file"
-	newurlfetch "google.golang.org/appengine/urlfetch"
+	gcsappengine "google.golang.org/appengine"
+	gcsfile      "google.golang.org/appengine/file"
+	gcsurlfetch  "google.golang.org/appengine/urlfetch"
 	"google.golang.org/cloud"
 	"google.golang.org/cloud/storage"
 )
 
-// type Result struct {
-// 	ReturnCode int `json:"returncode"`
-// }
-
-type Book struct {
-	Name       string    `json:"name"`
-	Author     string    `json:"author"`
-	Pages      int       `json:"pages"`
-	Year       int       `json:"year"`
-	CreateTime time.Time `json:"createtime"`
-}
-
 const BaseUrl = "/api/0.1/"
-const BookKind = "Book"
-const BookRoot = "Book Root"
-const BookMaxPages = 1000
-
-var BookName = []string{"AAA", "BBB", "CCC", "DDD", "EEE", "FFF", "GGG", "HHH", "III", "JJJ"}
-var BookAuthor = []string{"AuthorA", "AuthorB", "AuthorC", "AuthorD", "AuthorE", "AuthorF", "AuthorG", "AuthorH", "AuthorI", "AuthorJ"}
 
 func init() {
-	rand.Seed(time.Now().Unix())
 	http.HandleFunc(BaseUrl, rootPage)
 	// http.HandleFunc(BaseUrl+"queryAll", queryAll)
 	// http.HandleFunc(BaseUrl+"queryAllWithKey", queryAllWithKey)
 	http.HandleFunc(BaseUrl+"storeImage", storeImage)
 	// http.HandleFunc(BaseUrl+"deleteAll", deleteAll)
 	// http.HandleFunc(BaseUrl+"images", images)
-	log.Println("I'm out init()")
 }
 
 func rootPage(rw http.ResponseWriter, req *http.Request) {
@@ -90,46 +63,45 @@ func storeImage(rw http.ResponseWriter, req *http.Request) {
 		}
 	}()
 
+	// To log information in Google APP Engine console
+	var c appengine.Context
+	c = appengine.NewContext(req)
+
 	// Get data from body
 	b, err := ioutil.ReadAll(req.Body)
 	if err != nil {
-		fmt.Fprintln(rw, err, "in reading body")
+		c.Errorf("%s in reading body", err)
 		r = 1
 		return
 	}
-	fmt.Fprintln(rw, "Body length:", len(b))
+	c.Infof("Body length %d bytes, read %d bytes", req.ContentLength, len(b))
 
-	cc := appengine.NewContext(req)
-	bucket := ""
-	if bucket, err = file.DefaultBucketName(cc); err != nil {
-		fmt.Fprintln(rw, err, "in getting default GCS bucket name")
+	// Get default bucket name
+	var cc gcscontext.Context
+	var bucket string
+	cc = gcsappengine.NewContext(req)
+	if bucket, err = gcsfile.DefaultBucketName(cc); err != nil {
+		c.Errorf("%s in getting default GCS bucket name", err)
 		r = 1
 		return
 	}
-	c := newappengine.NewContext(req)
+	c.Infof("APP Engine Version: %s", gcsappengine.VersionID(cc))
+	c.Infof("Using bucket name: %s", bucket)
+
+	// Prepare Google Cloud Storage authentication
 	hc := &http.Client{
 		Transport: &oauth2.Transport{
-			Source: google.AppEngineTokenSource(c, storage.ScopeReadWrite),
+			Source: google.AppEngineTokenSource(cc, storage.ScopeReadWrite),
 			// Note that the App Engine urlfetch service has a limit of 10MB uploads and
 			// 32MB downloads.
 			// See https://cloud.google.com/appengine/docs/go/urlfetch/#Go_Quotas_and_limits
 			// for more information.
-			Base: &newurlfetch.Transport{Context: c},
+			Base: &gcsurlfetch.Transport{Context: cc},
 		},
 	}
-	ctx := cloud.NewContext(newappengine.AppID(c), hc)
-	fmt.Fprintln(rw, "APP Engine Version:", newappengine.VersionID(c))
-	fmt.Fprintln(rw, "Using bucket name:", bucket)
+	ctx := cloud.NewContext(gcsappengine.AppID(cc), hc)
 
-	// d := &demo{
-	// 	c:   c,
-	// 	w:   w,
-	// 	ctx: ctx,
-	// }
-
-	// createFile creates a file in Google Cloud Storage.
-	fmt.Fprintf(rw, "Creating file /%v/%v\n", bucket, fileName)
-
+	// Store file in Google Cloud Storage
 	wc := storage.NewWriter(ctx, bucket, fileName)
 	wc.ContentType = "image/jpeg"
 	// wc.Metadata = map[string]string{
@@ -137,15 +109,16 @@ func storeImage(rw http.ResponseWriter, req *http.Request) {
 	// 	"x-goog-meta-bar": "bar",
 	// }
 	if _, err := wc.Write(b); err != nil {
-		fmt.Fprintln(rw, "createFile: unable to write data to bucket %q, file %q: %v", bucket, fileName, err)
+		c.Errorf("CreateFile: unable to write data to bucket %q, file %q: %v", bucket, fileName, err)
 		r = 1
 		return
 	}
 	if err := wc.Close(); err != nil {
-		fmt.Fprintln(rw, "createFile: unable to close bucket %q, file %q: %v", bucket, fileName, err)
+		c.Errorf("CreateFile: unable to close bucket %q, file %q: %v", bucket, fileName, err)
 		r = 1
 		return
 	}
+	c.Infof("/%v/%v\n created", bucket, fileName)
 }
 
 // func queryAll(rw http.ResponseWriter, req *http.Request) {

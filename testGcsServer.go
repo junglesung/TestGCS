@@ -2,9 +2,7 @@ package main
 
 import (
 	"appengine"
-	_ "fmt"
 	"io/ioutil"
-	_ "log"
 	"net/http"
 
 	"github.com/pborman/uuid"
@@ -26,31 +24,32 @@ func init() {
 	// http.HandleFunc(BaseUrl+"queryAllWithKey", queryAllWithKey)
 	http.HandleFunc(BaseUrl+"storeImage", storeImage)
 	// http.HandleFunc(BaseUrl+"deleteAll", deleteAll)
-	// http.HandleFunc(BaseUrl+"images", images)
+	http.HandleFunc(BaseUrl+"images", images)
 }
 
 func rootPage(rw http.ResponseWriter, req *http.Request) {
 	//
 }
 
-// func images(rw http.ResponseWriter, req *http.Request) {
-// 	switch req.Method {
-// 	case "GET":
-// 		queryBook(rw, req)
-// 	case "POST":
-// 		storeImage(rw, req)
-// 	case "DELETE":
-// 		deleteBook(rw, req)
-// 	default:
-// 		queryAll(rw, req)
-// 	}
-// }
+func images(rw http.ResponseWriter, req *http.Request) {
+	switch req.Method {
+	// case "GET":
+		// queryBook(rw, req)
+	case "POST":
+		storeImage(rw, req)
+	// case "DELETE":
+	// 	deleteBook(rw, req)
+	default:
+		// queryAll(rw, req)
+	}
+}
 
 func storeImage(rw http.ResponseWriter, req *http.Request) {
 	// Result, 0: success, 1: failed
 	var r int = 0
-	fileName := uuid.New()+".jpg"
-	// var cKey *datastore.Key = nil
+	fileName := uuid.New()
+
+	// Set response in the end
 	defer func() {
 		// Return status. WriteHeader() must be called before call to Write
 		if r == 0 {
@@ -76,6 +75,18 @@ func storeImage(rw http.ResponseWriter, req *http.Request) {
 	}
 	c.Infof("Body length %d bytes, read %d bytes", req.ContentLength, len(b))
 
+	// Determine filename extension from content type
+	contentType := req.Header["Content-Type"][0]
+	switch contentType {
+	case "image/jpeg":
+		fileName += ".jpg"
+	default:
+		c.Errorf("Unknown or unsupported content type '%s'. Valid: image/jpeg", contentType)
+		r = 1
+		return
+	}
+	c.Infof("Content type %s is received, %s is detected.", contentType, http.DetectContentType(b))
+
 	// Get default bucket name
 	var cc gcscontext.Context
 	var bucket string
@@ -91,7 +102,7 @@ func storeImage(rw http.ResponseWriter, req *http.Request) {
 	// Prepare Google Cloud Storage authentication
 	hc := &http.Client{
 		Transport: &oauth2.Transport{
-			Source: google.AppEngineTokenSource(cc, storage.ScopeReadWrite),
+			Source: google.AppEngineTokenSource(cc, storage.ScopeFullControl),
 			// Note that the App Engine urlfetch service has a limit of 10MB uploads and
 			// 32MB downloads.
 			// See https://cloud.google.com/appengine/docs/go/urlfetch/#Go_Quotas_and_limits
@@ -101,9 +112,17 @@ func storeImage(rw http.ResponseWriter, req *http.Request) {
 	}
 	ctx := cloud.NewContext(gcsappengine.AppID(cc), hc)
 
+	// Change default object ACLs
+	err = storage.PutDefaultACLRule(ctx, bucket, "allUsers", storage.RoleReader)
+	// err = storage.PutACLRule(ctx, bucket, fileName, "allUsers", storage.RoleReader)
+	if err != nil {
+		c.Errorf("%v in saving ACL rule for bucket %q", err, bucket)
+		return
+	}
+
 	// Store file in Google Cloud Storage
 	wc := storage.NewWriter(ctx, bucket, fileName)
-	wc.ContentType = "image/jpeg"
+	wc.ContentType = contentType
 	// wc.Metadata = map[string]string{
 	// 	"x-goog-meta-foo": "foo",
 	// 	"x-goog-meta-bar": "bar",

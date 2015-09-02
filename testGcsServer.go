@@ -45,9 +45,20 @@ func images(rw http.ResponseWriter, req *http.Request) {
 }
 
 func storeImage(rw http.ResponseWriter, req *http.Request) {
+	// Appengine
+	var c appengine.Context
+	// Google Cloud Storage authentication
+	var cc gcscontext.Context
+	// Google Cloud Storage bucket name
+	var bucket string = ""
+	// User uploaded image file name
+	var fileName string = uuid.New()
+	// User uploaded image file type
+	var contentType string = ""
+	// User uploaded image file raw data
+	var b []byte
 	// Result, 0: success, 1: failed
 	var r int = 0
-	fileName := uuid.New()
 
 	// Set response in the end
 	defer func() {
@@ -55,7 +66,7 @@ func storeImage(rw http.ResponseWriter, req *http.Request) {
 		if r == 0 {
 			// Changing the header after a call to WriteHeader (or Write) has no effect.
 			// rw.Header().Set("Location", req.URL.String()+"/"+cKey.Encode())
-			rw.Header().Set("Location", req.URL.String()+"/"+fileName)
+			rw.Header().Set("Location", "http://"+bucket+".storage.googleapis.com/"+fileName)
 			rw.WriteHeader(http.StatusCreated)
 		} else {
 			http.Error(rw, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
@@ -63,7 +74,6 @@ func storeImage(rw http.ResponseWriter, req *http.Request) {
 	}()
 
 	// To log information in Google APP Engine console
-	var c appengine.Context
 	c = appengine.NewContext(req)
 
 	// Get data from body
@@ -76,7 +86,7 @@ func storeImage(rw http.ResponseWriter, req *http.Request) {
 	c.Infof("Body length %d bytes, read %d bytes", req.ContentLength, len(b))
 
 	// Determine filename extension from content type
-	contentType := req.Header["Content-Type"][0]
+	contentType = req.Header["Content-Type"][0]
 	switch contentType {
 	case "image/jpeg":
 		fileName += ".jpg"
@@ -88,8 +98,6 @@ func storeImage(rw http.ResponseWriter, req *http.Request) {
 	c.Infof("Content type %s is received, %s is detected.", contentType, http.DetectContentType(b))
 
 	// Get default bucket name
-	var cc gcscontext.Context
-	var bucket string
 	cc = gcsappengine.NewContext(req)
 	if bucket, err = gcsfile.DefaultBucketName(cc); err != nil {
 		c.Errorf("%s in getting default GCS bucket name", err)

@@ -16,7 +16,18 @@ import (
 	"google.golang.org/cloud/storage"
 )
 
+type Item struct {
+	Id         string    `json:"id"`
+	People     int       `json:"people"`
+	Attendant  int       `json:"attendant"`
+	Image      string    `json:"image"`
+	CreateTime time.Time `json:"createtime"`
+}
+
 const BaseUrl = "/api/0.1/"
+const BookKind = "Book"
+const BookRoot = "Book Root"
+const BookMaxPages = 1000
 
 func init() {
 	http.HandleFunc(BaseUrl, rootPage)
@@ -43,6 +54,47 @@ func images(rw http.ResponseWriter, req *http.Request) {
 		// queryAll(rw, req)
 	}
 }
+
+func searchImage(rw http.ResponseWriter, req *http.Request) {
+	// Get all entities
+	var dst []Book
+	r := 0
+	q := req.URL.Query()
+	f := datastore.NewQuery(BookKind)
+	for key := range q {
+		f = f.Filter(key+"=", q.Get(key))
+	}
+	c := appengine.NewContext(req)
+	k, err := f.GetAll(c, &dst)
+	if err != nil {
+		log.Println(err)
+		r = 1
+	}
+
+	// Map keys and books
+	var m map[string]*Book
+	m = make(map[string]*Book)
+	for i := range k {
+		m[k[i].Encode()] = &dst[i]
+ 	}
+
+ 	// Return status. WriteHeader() must be called before call to Write
+	if r == 0 {
+		rw.WriteHeader(http.StatusOK)
+	} else {
+		http.Error(rw, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+		return
+	}
+
+	// Return body
+	encoder := json.NewEncoder(rw)
+	if err = encoder.Encode(m); err != nil {
+		log.Println(err, "in encoding result", m)
+	} else {
+		log.Printf("SearchBook() returns %d items\n", len(m))
+	}
+}
+
 
 func storeImage(rw http.ResponseWriter, req *http.Request) {
 	// Appengine
